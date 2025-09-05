@@ -31,7 +31,6 @@ public class Consumer extends Thread {
                 Thread.sleep(2000);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                return;
             }
         }
     }

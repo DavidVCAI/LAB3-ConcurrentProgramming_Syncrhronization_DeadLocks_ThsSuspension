@@ -39,7 +39,6 @@ public class Producer extends Thread {
                 System.out.println("Producer added " + dataSeed + " (Queue size: " + queue.size() + ")");
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                return;
             }
 
             try {
