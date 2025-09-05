@@ -640,3 +640,667 @@ if (shouldStop) break;
 - [Java VisualVM](https://visualvm.github.io/) - *Performance monitoring and CPU analysis*
 - [IntelliJ IDEA](https://www.jetbrains.com/idea/) - *Java IDE with threading debugging support*
 - [Java Mission Control](https://www.oracle.com/java/technologies/javaruntime.html) - *Advanced profiling tool*
+
+## 🏴󠁧󠁢󠁳󠁣󠁴󠁿 **Part III: Highlander Simulator - Synchronization and Deadlock Prevention**
+
+### 📋 **Problem Statement**
+
+This section focuses on implementing **thread synchronization**, **deadlock prevention**, and **coordinated thread management** in a multi-threaded combat simulation. The *Highlander Simulator* demonstrates classic concurrency challenges including **race conditions**, **invariant preservation**, and **graceful thread termination**.
+
+### 🎯 **Learning Objectives**
+
+- ✅ Understanding **race condition detection** and prevention
+- ✅ Implementing **coordinated thread suspension** and resumption
+- ✅ Designing **deadlock prevention strategies** with ordered locking
+- ✅ Managing **shared state consistency** across multiple threads
+- ✅ Implementing **graceful thread termination** mechanisms
+- ✅ Using **concurrent collections** for thread-safe operations
+
+---
+
+### 🎮 **System Architecture**
+
+The **Highlander Simulator** implements a multi-threaded combat system where immortal fighters battle continuously until only one remains.
+
+#### 🏗️ **Core Components:**
+
+##### **Immortal.java**
+- **Extends**: `Thread` class with combat capabilities
+- **Features**:
+    - Autonomous combat behavior with random opponent selection
+    - Health management with damage dealing and receiving
+    - Thread coordination mechanisms (`pause`/`resume`/`stop`)
+    - Synchronized combat operations to prevent race conditions
+
+##### **ControlFrame.java**
+- **Purpose**: GUI controller and thread orchestration
+- **Features**:
+    - Thread lifecycle management (`start`/`pause`/`resume`/`stop`)
+    - Real-time health monitoring and invariant checking
+    - Combat statistics visualization
+    - User interaction handling
+
+##### **ImmortalUpdateReportCallback.java**
+- **Type**: Interface for combat event reporting
+- **Function**: Enables real-time combat logging and UI updates
+
+---
+
+### 🔍 **Point 1: System Analysis and Architecture Understanding**
+
+#### 📊 **Combat Mechanics**
+
+The simulator implements the following **combat system architecture**:
+
+**Initial Setup:**
+- **N immortals** start with `DEFAULT_IMMORTAL_HEALTH = 100` health points each
+- Each immortal runs as an **independent thread**
+- Combat damage is fixed at `DEFAULT_DAMAGE_VALUE = 10` per attack
+
+**Combat Flow:**
+```java
+// Each immortal continuously:
+1. Select random opponent (avoid self-targeting)
+2. Execute fight() method against opponent
+3. Transfer health from victim to attacker
+4. Report combat results
+5. Sleep briefly, then repeat
+```
+
+**Health Transfer Mechanism:**
+```java
+public void fight(Immortal opponent) {
+    if (opponent.getHealth() > 0) {
+        opponent.changeHealth(opponent.getHealth() - defaultDamageValue);  // -10 to opponent
+        this.health += defaultDamageValue;                                 // +10 to attacker
+        // Report combat event
+    }
+}
+```
+
+---
+
+### 🧮 **Point 2: Mathematical Invariant Analysis**
+
+#### 📐 **Theoretical Health Conservation**
+
+**Invariant Formula:**
+```
+Total Health = N × Initial Health per Immortal
+Total Health = N × 100 points
+```
+
+**For N = 3 immortals:**
+```
+Expected Invariant = 3 × 100 = 300 health points (constant)
+```
+
+#### 🔬 **Why the Invariant Should Hold**
+
+**Health Transfer Properties:**
+- ⚖️ **Conservation principle**: Health is **transferred**, not created or destroyed
+- 🔄 **Zero-sum operations**: Every `-10` to victim equals `+10` to attacker
+- 🎯 **Mathematical guarantee**: `(a-10) + (b+10) = a + b`
+
+**Implementation Analysis:**
+```java
+// Theoretical atomic operation:
+victim.health -= 10;    // Decreases total by 10
+attacker.health += 10;  // Increases total by 10
+// Net change: 0 (invariant preserved)
+```
+
+---
+
+### ⚠️ **Point 3: Race Condition Verification**
+
+#### 🎯 **Invariant Violation Detection**
+
+We executed the **"Pause and Check"** functionality multiple times to verify invariant consistency:
+
+**Test Results:**
+
+<img src="assets/images/image_1.png" alt="Invariant Check - First Execution" width="70%">
+
+<img src="assets/images/image_2.png" alt="Invariant Check - Second Execution" width="70%">
+
+<img src="assets/images/image_3.png" alt="Invariant Check - Third Execution" width="70%">
+
+#### 📊 **Observed Results Analysis**
+
+**Key Findings:**
+- ❌ **Invariant violation confirmed**: Health totals vary between measurements
+- 🔍 **Inconsistent values**: Multiple executions show different sums
+- ⚡ **Race condition evidence**: Concurrent health modifications cause data corruption
+
+**Root Cause Analysis:**
+```java
+// Problem in original fight() method:
+public void fight(Immortal i2) {
+    if (i2.getHealth() > 0) {
+        i2.changeHealth(i2.getHealth() - defaultDamageValue);  // ← Non-atomic operation
+        this.health += defaultDamageValue;                     // ← Separate unsynchronized operation
+    }
+}
+```
+
+**Race Condition Scenario:**
+1. **Thread A** reads `opponent.getHealth()` → gets 50
+2. **Thread B** modifies `opponent.health` → changes to 40
+3. **Thread A** calculates `50 - 10 = 40` and sets health
+4. **Thread B's** modification is lost → **health inconsistency**
+
+---
+
+### ⏸️ **Point 4: Coordinated Thread Suspension Implementation**
+
+#### 🎯 **Objective**
+
+Implement **coordinated thread pausing** to ensure accurate health sum calculations by suspending all combat operations before measurement.
+
+#### 🔧 **Implementation Strategy**
+
+**Enhanced Thread Control Mechanism:**
+
+**Modified `Immortal.java` - Added pause control:**
+```java
+private boolean paused = false;
+
+@Override
+public void run() {
+    while (true) {
+        synchronized(this) {
+            while (paused) {
+                try {
+                    wait();  // Suspend thread until notified
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+        
+        // Combat logic continues only when not paused
+        // ... existing combat code ...
+    }
+}
+
+public void pauseImmortal() {
+    paused = true;
+}
+
+public void resumeImmortal() {
+    synchronized(this) {
+        paused = false;
+        notify();  // Wake up the waiting thread
+    }
+}
+```
+
+**Enhanced `ControlFrame.java` - Coordinated pause/resume:**
+```java
+btnPauseAndCheck.addActionListener(new ActionListener() {
+    public void actionPerformed(ActionEvent e) {
+        // 1. Signal all immortals to pause
+        for (Immortal im : immortals) {
+            im.pauseImmortal();
+        }
+        
+        // 2. Wait until all threads are actually paused
+        boolean allPaused = false;
+        while (!allPaused) {
+            allPaused = true;
+            for (Immortal im : immortals) {
+                if (!im.isPaused()) {
+                    allPaused = false;
+                    break;
+                }
+            }
+            Thread.sleep(10);  // Brief wait before rechecking
+        }
+        
+        // 3. Calculate health sum with all threads suspended
+        int sum = 0;
+        for (Immortal im : immortals) {
+            sum += im.getHealth();
+        }
+        
+        statisticsLabel.setText("<html>"+immortals.toString()+"<br>Health sum:"+ sum);
+    }
+});
+
+btnResume.addActionListener(new ActionListener() {
+    public void actionPerformed(ActionEvent e) {
+        for (Immortal im : immortals) {
+            im.resumeImmortal();
+        }
+    }
+});
+```
+
+#### ✅ **Verification Results**
+
+**Coordinated Suspension Success:**
+
+<img src="assets/images/image_4.png" alt="Successful Coordinated Pause" width="70%">
+
+**Key Achievements:**
+- ✅ **Consistent measurements**: Multiple "Pause and Check" operations show identical health sums
+- ✅ **Complete synchronization**: All threads suspend before calculation
+- ✅ **Reliable resumption**: Combat continues normally after resume
+- ✅ **Race condition elimination**: No concurrent modifications during measurement
+
+---
+
+### 🔒 **Point 6: Synchronized Combat Implementation**
+
+#### 🎯 **Critical Section Identification**
+
+**Race Condition Locations:**
+- 🎯 **Health modification operations**: Multiple threads modifying health simultaneously
+- 🔄 **Combat resolution**: Attacker and victim health updates must be atomic
+- 📊 **Health reading operations**: Concurrent reads during modifications
+
+#### 🛡️ **Synchronization Strategy**
+
+**Deadlock Prevention with Ordered Locking:**
+
+```java
+public void fight(Immortal i2) {
+    // Order locks by hashCode to prevent deadlock
+    Immortal firstLock = this.hashCode() < i2.hashCode() ? this : i2;
+    Immortal secondLock = this.hashCode() < i2.hashCode() ? i2 : this;
+    
+    synchronized(firstLock) {
+        synchronized(secondLock) {
+            if (i2.getHealth() > 0) {
+                i2.changeHealth(i2.getHealth() - defaultDamageValue);
+                this.health += defaultDamageValue;
+                updateCallback.processReport("Fight: " + this + " vs " + i2+"\n");
+            } else {
+                updateCallback.processReport(this + " says:" + i2 + " is already dead!\n");
+            }
+        }
+    }
+}
+
+public synchronized void changeHealth(int v) {
+    health = v;
+}
+
+public synchronized int getHealth() {
+    return health;
+}
+```
+
+#### 🧠 **Deadlock Prevention Logic**
+
+**Why Ordered Locking Works:**
+- 🔢 **Consistent ordering**: `hashCode()` provides deterministic lock order
+- 🚫 **Eliminates circular dependencies**: Both threads acquire locks in same sequence
+- ⚡ **Performance preservation**: Fine-grained locking maintains concurrency
+
+**Lock Acquisition Pattern:**
+```java
+// Thread A attacking Thread B:
+synchronized(lower_hashcode) {     // e.g., Thread A (hash: 100)
+    synchronized(higher_hashcode) { // e.g., Thread B (hash: 200)
+        // Combat operations
+    }
+}
+
+// Thread B attacking Thread A:
+synchronized(lower_hashcode) {     // e.g., Thread A (hash: 100) - SAME ORDER!
+    synchronized(higher_hashcode) { // e.g., Thread B (hash: 200) - SAME ORDER!
+        // Combat operations  
+    }
+}
+```
+
+---
+
+### 🗑️ **Point 10: Dynamic Immortal Removal Implementation**
+
+#### 🎯 **Problem Statement**
+
+**Performance Issue**: Dead immortals (`health ≤ 0`) remain in the simulation, causing:
+- 💀 **Wasted combat attempts** against dead opponents
+- 📉 **Reduced simulation efficiency** with unnecessary iterations
+- 🔄 **Cluttered combat logs** with "already dead" messages
+
+#### 🔧 **Solution Strategy**
+
+**Concurrent Collection Implementation:**
+
+**Enhanced `ControlFrame.java` - Thread-safe collection:**
+```java
+public List<Immortal> setupInmortals() {
+    try {
+        int ni = Integer.parseInt(numOfImmortals.getText());
+        
+        // Use thread-safe collection for concurrent modifications
+        List<Immortal> il = new java.util.concurrent.CopyOnWriteArrayList<Immortal>();
+        
+        for (int i = 0; i < ni; i++) {
+            Immortal i1 = new Immortal("im" + i, il, DEFAULT_IMMORTAL_HEALTH, DEFAULT_DAMAGE_VALUE, ucb);
+            il.add(i1);
+        }
+        return il;
+    } catch (NumberFormatException e) {
+        JOptionPane.showConfirmDialog(null, "Invalid number.");
+        return null;
+    }
+}
+```
+
+**Enhanced `Immortal.java` - Intelligent opponent selection and removal:**
+```java
+@Override
+public void run() {
+    while (!stopped) {
+        // Pause control logic...
+        
+        if (stopped) break;
+        
+        // Check if this immortal is still alive
+        if (this.getHealth() <= 0) {
+            break;  // Exit if dead
+        }
+        
+        Immortal im = null;
+        
+        // Thread-safe opponent selection
+        synchronized(immortalsPopulation) {
+            if (immortalsPopulation.size() <= 1) {
+                break;  // Only one or no immortals left
+            }
+            
+            int myIndex = immortalsPopulation.indexOf(this);
+            if (myIndex == -1) {
+                break;  // Already removed from list
+            }
+            
+            // Find a living opponent
+            int attempts = 0;
+            while (im == null && attempts < immortalsPopulation.size()) {
+                int nextFighterIndex = r.nextInt(immortalsPopulation.size());
+                
+                if (nextFighterIndex != myIndex) {
+                    Immortal candidate = immortalsPopulation.get(nextFighterIndex);
+                    if (candidate.getHealth() > 0) {
+                        im = candidate;
+                    }
+                }
+                attempts++;
+            }
+        }
+        
+        if (im != null) {
+            this.fight(im);
+        }
+        
+        Thread.sleep(1);
+    }
+}
+
+public void fight(Immortal i2) {
+    // Synchronized combat with ordered locking...
+    synchronized(firstLock) {
+        synchronized(secondLock) {
+            if (i2.getHealth() > 0) {
+                i2.changeHealth(i2.getHealth() - defaultDamageValue);
+                this.health += defaultDamageValue;
+                updateCallback.processReport("Fight: " + this + " vs " + i2+"\n");
+                
+                // Remove dead immortals immediately
+                if (i2.getHealth() <= 0) {
+                    immortalsPopulation.remove(i2);
+                    updateCallback.processReport(i2 + " has died and been removed from simulation!\n");
+                }
+            } else {
+                updateCallback.processReport(this + " says:" + i2 + " is already dead!\n");
+            }
+        }
+    }
+}
+```
+
+#### 🏆 **Benefits of CopyOnWriteArrayList**
+
+**Thread-Safety Without Locks:**
+- 🔒 **Lock-free reads**: Multiple threads can read simultaneously
+- ✅ **Safe modifications**: Writes create new array copy
+- 🚫 **No synchronization overhead**: Eliminates explicit locking for collection access
+- ⚡ **Performance optimization**: Ideal for read-heavy, occasional-write scenarios
+
+---
+
+### 🛑 **Point 11: Graceful Thread Termination Implementation**
+
+#### 🎯 **Objective**
+
+Implement **complete simulation termination** functionality allowing users to stop all combat operations and reset the simulation state.
+
+#### 🔧 **Implementation Strategy**
+
+**Enhanced Thread Control:**
+
+**Modified `Immortal.java` - Stop control mechanism:**
+```java
+private boolean stopped = false;
+
+@Override
+public void run() {
+    while (!stopped) {  // Main loop condition
+        synchronized(this) {
+            while (paused && !stopped) {  // Check stop condition in pause
+                try {
+                    wait();
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+        
+        if (stopped) break;  // Exit immediately if stopped
+        
+        // Combat logic continues...
+    }
+}
+
+public void stopImmortal() {
+    synchronized(this) {
+        stopped = true;
+        paused = false;  // Release from pause if needed
+        notify();        // Wake up if waiting
+    }
+}
+```
+
+**Enhanced `ControlFrame.java` - Complete shutdown mechanism:**
+```java
+btnStop.addActionListener(new ActionListener() {
+    public void actionPerformed(ActionEvent e) {
+        if (immortals != null) {
+            // 1. Signal all immortals to stop
+            for (Immortal im : immortals) {
+                im.stopImmortal();
+            }
+            
+            // 2. Wait for all threads to terminate gracefully
+            for (Immortal im : immortals) {
+                try {
+                    im.join();  // Wait for thread completion
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                }
+            }
+            
+            // 3. Clean up simulation state
+            immortals.clear();
+            
+            // 4. Reset user interface
+            output.setText("");
+            statisticsLabel.setText("Immortals total health:");
+            
+            // 5. Re-enable start button for new simulation
+            btnStart.setEnabled(true);
+            
+            // 6. Confirm termination
+            output.append("Simulation stopped. All immortals have been terminated.\n");
+        }
+    }
+});
+```
+
+#### ✅ **Termination Verification**
+
+**Successful Thread Termination:**
+
+<img src="assets/images/image_5.png" alt="Successful Simulation Termination" width="70%">
+
+**Key Features Verified:**
+- ✅ **Immediate response**: Stop button terminates simulation instantly
+- ✅ **Graceful shutdown**: All threads terminate without hanging
+- ✅ **State cleanup**: Simulation resets to initial state
+- ✅ **UI reset**: Interface ready for new simulation
+- ✅ **Memory management**: No thread leaks or zombie processes
+
+---
+
+### 📊 **Performance Analysis and Results**
+
+#### 🏆 **Synchronization Effectiveness**
+
+| **Feature** | **Before Implementation** | **After Implementation** | **Improvement** |
+|:-----------:|:-------------------------:|:------------------------:|:---------------:|
+| **Invariant Consistency** | Violated (random sums) | Preserved (constant sum) | **✅ 100% accuracy** |
+| **Race Conditions** | Present (data corruption) | Eliminated (atomic operations) | **✅ Complete prevention** |
+| **Thread Coordination** | None (chaotic execution) | Coordinated (pause/resume) | **✅ Full control** |
+| **Dead Immortal Cleanup** | Manual (performance impact) | Automatic (efficient) | **✅ Real-time optimization** |
+| **Simulation Control** | Basic start only | Complete lifecycle | **✅ Professional UX** |
+
+#### 🔍 **Concurrency Patterns Implemented**
+
+##### **1. Monitor Pattern (Thread Coordination)**
+```java
+synchronized(this) {
+    while (paused && !stopped) {
+        wait();  // Efficient suspension
+    }
+}
+```
+
+##### **2. Ordered Locking Pattern (Deadlock Prevention)**
+```java
+Immortal firstLock = this.hashCode() < i2.hashCode() ? this : i2;
+Immortal secondLock = this.hashCode() < i2.hashCode() ? i2 : this;
+// Consistent lock ordering prevents circular dependencies
+```
+
+##### **3. Copy-on-Write Pattern (Thread-Safe Collections)**
+```java
+List<Immortal> il = new CopyOnWriteArrayList<Immortal>();
+// Lock-free concurrent access with modification safety
+```
+
+##### **4. Graceful Shutdown Pattern (Resource Management)**
+```java
+// Signal termination → Wait for completion → Clean resources
+for (Immortal im : immortals) {
+    im.stopImmortal();
+}
+for (Immortal im : immortals) {
+    im.join();
+}
+```
+
+---
+
+### 🎯 **Key Learning Outcomes**
+
+#### **Advanced Concurrency Concepts**
+- ✅ **Race condition identification**: Detecting and analyzing data corruption scenarios
+- ✅ **Invariant preservation**: Maintaining mathematical guarantees in concurrent systems
+- ✅ **Deadlock prevention**: Implementing ordered locking strategies
+- ✅ **Thread lifecycle management**: Coordinating suspension, resumption, and termination
+
+#### **Synchronization Mastery**
+- ✅ **Monitor pattern implementation**: Using `wait()`/`notify()` for thread coordination
+- ✅ **Atomic operations**: Ensuring consistency in shared state modifications
+- ✅ **Lock ordering**: Preventing circular dependencies in multi-lock scenarios
+- ✅ **Concurrent collections**: Leveraging thread-safe data structures
+
+#### **System Design Excellence**
+- ✅ **Performance optimization**: Eliminating unnecessary operations through intelligent cleanup
+- ✅ **Resource management**: Implementing proper thread termination and cleanup
+- ✅ **User experience**: Providing complete simulation control capabilities
+- ✅ **Fault tolerance**: Handling edge cases and error conditions gracefully
+
+---
+
+### 🔧 **Technical Implementation Summary**
+
+#### **Compilation and Execution**
+
+**Build Command:**
+```bash
+mvn compile
+```
+
+**Execution Command:**
+```bash
+mvn exec:java -Dexec.mainClass="edu.eci.arsw.highlandersim.ControlFrame"
+```
+
+#### **Key Architecture Components**
+
+##### **Thread-Safe Combat System**
+- 🔒 **Synchronized health operations** with ordered locking
+- ⚡ **Atomic health transfers** preventing race conditions
+- 🎯 **Intelligent opponent selection** with living target validation
+
+##### **Coordinated Thread Management**
+- ⏸️ **Pause/Resume functionality** with complete thread suspension
+- 🛑 **Graceful termination** with resource cleanup
+- 📊 **Real-time monitoring** with invariant verification
+
+##### **Performance Optimizations**
+- 🗑️ **Dynamic dead immortal removal** using concurrent collections
+- 🔄 **Efficient combat loops** with early termination conditions
+- 📈 **Scalable architecture** supporting large immortal populations
+
+---
+
+### 🏆 **Final Results and Achievements**
+
+#### **Concurrency Excellence**
+1. **Zero Race Conditions**: Complete elimination of data corruption through proper synchronization
+2. **Deadlock Prevention**: Robust ordered locking strategy preventing circular dependencies
+3. **Thread Coordination**: Professional-grade pause/resume/stop functionality
+4. **Performance Optimization**: Dynamic cleanup and efficient resource utilization
+
+#### **Software Engineering Best Practices**
+1. **Clean Architecture**: Separation of concerns between combat logic and UI control
+2. **Resource Management**: Proper thread lifecycle management with graceful termination
+3. **Error Handling**: Robust exception handling and edge case management
+4. **User Experience**: Intuitive interface with complete simulation control
+
+#### **Educational Value**
+1. **Practical Concurrency**: Real-world application of synchronization concepts
+2. **Problem-Solving**: Systematic approach to identifying and resolving race conditions
+3. **Performance Analysis**: Understanding impact of synchronization on system efficiency
+4. **Design Patterns**: Implementation of proven concurrency patterns and best practices
+
+---
+
+### 📚 **Additional Resources and References**
+
+#### **Concurrency Documentation**
+- [Java Concurrency in Practice](https://jcip.net/) - *Comprehensive concurrency guide*
+- [Oracle Concurrency Tutorial](https://docs.oracle.com/javase/tutorial/essential/concurrency/) - *Official Java concurrency documentation*
+- [Concurrent Collections Guide](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/package-summary.html) - *Thread-safe collection implementations*
+
+#### **Synchronization Patterns**
+- [Monitor Pattern](https://en.wikipedia.org/wiki/Monitor_(synchronization)) - *Synchronization mechanism fundamentals*
+- [Deadlock Prevention](https://docs.oracle.com/javase/tutorial/essential/concurrency/deadlock.html) - *Strategies for avoiding circular dependencies*
+- [Copy-on-Write Collections](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CopyOnWriteArrayList.html) - *Lock-free concurrent data structures*
